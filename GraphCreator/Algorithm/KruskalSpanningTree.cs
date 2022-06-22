@@ -5,11 +5,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Newtonsoft.Json;
 
 namespace GraphCreator.Algorithm.SimpleAlgorithms
 {
@@ -24,7 +22,6 @@ namespace GraphCreator.Algorithm.SimpleAlgorithms
         }
         public virtual async Task Run()
         {
-            
             Edge[] projectEdges = project.Edges.ToArray();
             Edge[] projectEdgesOrdered = project.Edges.OrderBy(x=>x.Weight).ToArray();
             var threadsNum = 3;
@@ -53,7 +50,8 @@ namespace GraphCreator.Algorithm.SimpleAlgorithms
             }
             else
             {
-                var edgesDividedForThreads = project.Edges.Partition(threadsNum).Select(x => x.ToArray()).ToArray();
+
+            var edgesDividedForThreads = project.Edges.Partition(threadsNum).Select(x => x.ToArray()).ToArray();
 
                     foreach (var edgeGroup in edgesDividedForThreads)
                     {
@@ -124,7 +122,12 @@ namespace GraphCreator.Algorithm.SimpleAlgorithms
                 mainThread.Start();
                 mainThread.Join();
             }
+
+
             t2.Stop();
+
+            
+            
 
             if (project.Edges.Count(x=>x.IsSpanning) != project.Vertexes.Count - 1)
             {
@@ -137,12 +140,151 @@ namespace GraphCreator.Algorithm.SimpleAlgorithms
             {
                 throw new Exception("The graph is not spanning.");
             }
-            Console.WriteLine("Time !parallel: " + t2.ElapsedMilliseconds);
-
-
-            
 
             foreach (var sEdge in project.Edges.Where(x=>x.IsSpanning))
+            {
+                sEdge.Style.LineWidth = 2;
+                sEdge.Style.LineColor = Color.Black;
+            }
+
+            MessageBox.Show("Час виконання алгоритму: " + t2.ElapsedMilliseconds);
+
+        }
+        public virtual async Task Testing()
+        {
+            Edge[] projectEdges = project.Edges.ToArray();
+            Edge[] projectEdgesOrdered = project.Edges.OrderBy(x => x.Weight).ToArray();
+            var threadsNum = 3;
+            bool isSpanning = false;
+
+            var t2 = new Stopwatch();
+            t2.Start();
+            projectEdges.First(x => !x.IsDenied).IsSpanning = true;
+
+            //if (IsSync)
+            //{
+            for (int i = 0; i < projectEdgesOrdered.Length; i++)
+            {
+                var edge = projectEdgesOrdered[i];
+                if (!edge.IsSpanning)
+                {
+                    Edge[] tempEdgeTree = projectEdgesOrdered.Where(x => x.IsSpanning).ToArray();
+                    var isNormal = CheckOnCycle(edge, tempEdgeTree);
+
+                    if (isNormal)
+                    {
+                        edge.IsSpanning = true;
+                    }
+                }
+            }
+            //}
+            //else
+            //{
+            var firstEdges = projectEdges.Where(x => x.IsSpanning).ToList();
+
+            foreach (var edge in projectEdges)
+            {
+                edge.IsSpanning = false;
+            }
+
+            var edgesDividedForThreads = project.Edges.Partition(threadsNum).Select(x => x.ToArray()).ToArray();
+
+            foreach (var edgeGroup in edgesDividedForThreads)
+            {
+                Thread backgroundThread = new Thread(() =>
+                {
+                    while (!isSpanning)
+                    {
+                        Edge[] spanningEdges = projectEdges.Where(x => x.IsSpanning).ToArray();
+                        List<Edge> notVisitedEdges = edgeGroup.Where(x => !x.IsSpanning && !x.IsDenied && !x.IsDeniedByMain).ToList();
+
+                        if (!notVisitedEdges.Any())
+                        {
+                            Thread.CurrentThread.Abort();
+                        }
+
+                        for (int i = 0; i < notVisitedEdges.Count; i++)
+                        {
+                            lock (notVisitedEdges)
+                            {
+                                var edge = notVisitedEdges[i];
+                                var isNormal = CheckOnCycle(edge, spanningEdges);
+                                if (!isNormal)
+                                {
+                                    edge.IsDenied = true;
+                                }
+                            }
+                        }
+                    }
+                });
+                backgroundThread.Start();
+            }
+
+
+
+
+
+            Thread mainThread = new Thread(() =>
+            {
+                for (int i = 0; i < projectEdgesOrdered.Length; i++)
+                {
+                    lock (projectEdgesOrdered[i])
+                    {
+                        var edge = projectEdgesOrdered[i];
+                        if (!edge.IsSpanning && !edge.IsDenied && !edge.IsDeniedByMain)
+                        {
+                            Edge[] tempEdgeTree = projectEdgesOrdered.Where(x => x.IsSpanning).ToArray();
+                            var isNormal = CheckOnCycle(edge, tempEdgeTree);
+
+                            if (isNormal)
+                            {
+                                edge.IsSpanning = true;
+                                if (!projectEdgesOrdered.Any(x => !x.IsDenied && !x.IsSpanning && !x.IsDeniedByMain))
+                                {
+                                    isSpanning = true;
+                                    Thread.CurrentThread.Abort();
+                                }
+                            }
+                            else
+                            {
+                                edge.IsDeniedByMain = true;
+                            }
+                        }
+                    }
+
+                }
+
+            });
+            mainThread.Start();
+            mainThread.Join();
+            //}
+
+
+            t2.Stop();
+
+            var secondEdges = projectEdges.Where(x => x.IsSpanning).ToList();
+
+            var firstNotSecond = firstEdges.Except(secondEdges).ToList();
+            var secondNotFirst = secondEdges.Except(firstEdges).ToList();
+
+            if (firstNotSecond.Any() || secondNotFirst.Any())
+            {
+                throw new Exception("Lists are different.");
+            }
+
+            if (project.Edges.Count(x => x.IsSpanning) != project.Vertexes.Count - 1)
+            {
+                throw new Exception("There are not all vertexes binded.");
+            }
+
+            var edges = projectEdges.Where(x => x.IsSpanning).ToList();
+            var vertexes = edges.Select(x => x.StartVertex).Union(edges.Select(x => x.EndVertex)).ToList();
+            if (!GraphHelper.IsGraphSpanning(vertexes, edges))
+            {
+                throw new Exception("The graph is not spanning.");
+            }
+
+            foreach (var sEdge in project.Edges.Where(x => x.IsSpanning))
             {
                 sEdge.Style.LineWidth = 2;
                 sEdge.Style.LineColor = Color.Black;
